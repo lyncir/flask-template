@@ -2,8 +2,10 @@
 
 import os
 import urlparse
+from functools import wraps
+from werkzeug.exceptions import Forbidden
 from flask import Flask, g, render_template, redirect, url_for, session, \
-        request
+        request, current_app
 import torndb
 from flask.ext.login import LoginManager, UserMixin, login_user, current_user, \
         logout_user, login_required
@@ -88,6 +90,29 @@ def next_url(url):
         if o.path in ['/login', '/logout']:
             return None
 
+
+def permision(func):
+    @wraps(func)
+    def decorated_view(*args, **kwargs):
+        if not current_user.is_authenticated():
+            return current_app.login_manager.unauthorized()
+        uris = g.mysql_db.get("select group_concat(path) as uris from \
+                (select * from users left join (select user_id,user_role.role_id, \
+                route_id from user_role inner join role_route on \
+                user_role.role_id=role_route.role_id) A on \
+                users.id=A.user_id) B left join routes on B.route_id= routes.id \
+                where username=%s", current_user.username)
+        uri = unicode(request.url_rule)
+        if uris.get('uris'):
+            if uri in uris.get('uris').split(','):
+                return func(*args, **kwargs)
+            else:
+                raise Forbidden("You do not have access")
+        else:
+            raise Forbidden("You do not have access")
+    return decorated_view
+
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     form = LoginForm()
@@ -104,7 +129,14 @@ def logout():
     logout_user()
     return redirect(url_for('index'))
 
-@app.route('/page1')
+
+@app.route('/pageAdmin')
 @login_required
 def page1():
     return render_template('page1.html')
+
+
+@app.route('/pageUser')
+@permision
+def page2():
+    return render_template('page2.html')
