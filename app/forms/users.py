@@ -3,7 +3,10 @@
 from urlparse import urlparse, urljoin
 from flask import g, request, redirect, url_for
 from flask.ext.wtf import Form
+from flask.ext.login import current_user
 from wtforms import fields, validators
+
+from app import bcrypt
 
 
 def is_safe_url(target):
@@ -27,7 +30,7 @@ class RedirectForm(Form):
     def __init__(self, *args, **kwargs):
         Form.__init__(self, *args, **kwargs)
         if not self.next.data:
-            self.next.data = get_redirect_target() or ''
+            self.next.data = get_redirect_target() or '/'
 
     def redirect(self, endpoint='index', **values):
         if is_safe_url(self.next.data):
@@ -44,7 +47,8 @@ class LoginForm(RedirectForm):
     def validate_username(self, field):
         user = self.get_user()
         if user:
-            if self.password.data != user.password:
+            #if self.password.data != user.password:
+            if not bcrypt.check_password_hash(user.password, self.password.data):
                 raise validators.ValidationError("Username or Password Error!")
         else:
             raise validators.ValidationError("Username or Password Error!")
@@ -53,3 +57,30 @@ class LoginForm(RedirectForm):
         user = g.mysql_db.get('select * from users where username=%s and active=1',
                 self.username.data)
         return user
+
+
+class AddUserForm(Form):
+    username = fields.StringField(u'Username', validators=[validators.DataRequired()])
+    password = fields.PasswordField(u'Password',
+            validators=[validators.DataRequired()])
+
+    def validate_username(self, field):
+        user = g.mysql_db.get('select * from users where username=%s', 
+                self.username.data)
+        if user:
+            raise validators.ValidationError('User is exists')
+
+
+class ChangedPasswordForm(Form):
+    username = fields.StringField(u'Username', validators=[validators.DataRequired()])
+    old_password = fields.PasswordField(u'Old Password', validators=[validators.DataRequired()])
+    new_password = fields.PasswordField(u'New Password',
+            validators=[validators.DataRequired(),
+                        validators.EqualTo('confirm_password', message='Password must be match')])
+    confirm_password = fields.PasswordField(u'Confirm Password', validators=[validators.DataRequired()])
+
+    def validate_old_password(self, field):
+        oldpassword = current_user.password
+        #if self.old_password.data != oldpassword:
+        if not bcrypt.check_password_hash(oldpassword, self.old_password.data):
+            raise validators.ValidationError("Password must be match")
